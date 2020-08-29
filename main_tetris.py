@@ -1,4 +1,4 @@
-from introprog.tetris.tetris import Tetris, Tetromino
+from tetris import Tetris
 
 Tetris.init()
 Tetris().run()
