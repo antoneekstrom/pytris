@@ -56,6 +56,7 @@ class Mino:
 
 class Tetromino:
     fall_speed = 400
+    FREEZE_TIME = 2
 
     @staticmethod
     def rotate_structure_cc(structure):
@@ -81,6 +82,7 @@ class Tetromino:
         self.pos = pos
         self.matrix = None
         self._create()
+        self.freeze_timer = 0
 
     def _create(self):
         structure = self.structure
@@ -115,8 +117,20 @@ class Tetromino:
 
         return True
 
+    def set_pos(self, pos):
+        if pos is None:
+            return
+        self._destroy()
+        self.pos = pos
+        self.pos = self.inside_bounds_delta(self.structure)
+        self._create()
+        self.place(self.matrix)
+
     def update(self):
-        if pygame.time.get_ticks() - self.last_fall >= Tetromino.fall_speed:
+        keys = pygame.key.get_pressed()
+        fall_speed = int(Tetromino.fall_speed / 3) if keys[pygame.K_s] else Tetromino.fall_speed
+
+        if pygame.time.get_ticks() - self.last_fall >= fall_speed:
             self.fall()
             self.last_fall = pygame.time.get_ticks()
         for mino in self.minos:
@@ -134,6 +148,7 @@ class Tetromino:
 
     def instant_fall(self):
         i = 0
+        self.freeze_timer = self.FREEZE_TIME
         while self.fall():
             for mino in self.minos:
                 mino.update()
@@ -141,20 +156,16 @@ class Tetromino:
                 break
             i += 1
 
-    def rotate_cc(self):
-        # rotate structure
-        rotated = Tetromino.rotate_structure_cc(self.structure)
-
-        # move tetromino back inside bounds (if neccessary), or abort rotation if other minos are in the way
+    def inside_bounds_delta(self, structure):
         dx_outside, dy_outside = 0, 0
-        for y in range(len(rotated)):
-            for x in range(len(rotated[0])):
+        for y in range(len(structure)):
+            for x in range(len(structure[0])):
                 abs_pos = (x + self.pos[0], y + self.pos[1])
 
                 # check if colliding with other minos
                 cell = self.matrix.get(abs_pos)
                 if cell is not None and cell != Matrix.OUT_OF_BOUNDS and cell[1]:
-                    return
+                    continue
 
                 # check if outside and how far outside
                 outside = not self.matrix.test_bounds(abs_pos)
@@ -163,7 +174,15 @@ class Tetromino:
                         dx_outside = x
                     if abs(y) > abs(dy_outside):
                         dy_outside = y
-        moved_pos = (self.pos[0] - dx_outside, self.pos[1])
+        moved_pos = self.pos[0] - dx_outside, self.pos[1]
+        return moved_pos
+
+    def rotate_cc(self):
+        # rotate structure
+        rotated = Tetromino.rotate_structure_cc(self.structure)
+
+        # move tetromino back inside bounds (if neccessary), or abort rotation if other minos are in the way
+        moved_pos = self.inside_bounds_delta(rotated)
 
         # remove from matrix
         self._destroy()
@@ -178,6 +197,9 @@ class Tetromino:
         # re-place tetromino
         for mino in self.minos:
             mino.place(self.matrix)
+
+        # reset freeze_timer
+        self.freeze_timer = 0
 
     def draw_landing_column(self, screen):
         xf, yf = self.matrix.matrix_scale_factor()
@@ -202,6 +224,10 @@ class Tetromino:
         return len(self.structure[0])
 
     def freeze(self):
+        if self.freeze_timer < self.FREEZE_TIME:
+            self.freeze_timer += 1
+            return
+
         self.frozen = True
         for mino in self.minos:
             mino.frozen = True
@@ -291,7 +317,7 @@ class Tetris:
     FONT = None
 
     SCORE_INCREMENTS = [50, 100, 200, 300]
-    ROW_COMBO_TIME = 2500
+    ROW_COMBO_TIME = 3000
 
     QUEUE_SIZE, QUEUE_VISIBLE_SIZE = 14, 5
 
@@ -332,10 +358,11 @@ class Tetris:
 
     def __init__(self):
         self.matrix: Matrix = None
-        self.items = None
         self.piece_queue = None
         self.piece_hold = None
+        self.cur_piece: Tetromino = None
 
+        self.cursor_x = 0
         self.row_combo = 0
         self.score = 0
         self.screen = None
@@ -363,7 +390,7 @@ class Tetris:
         piece = None
         while piece is None or self.queue_count(piece) >= 2:
             piece = random.choice(Tetris.ALL_PIECES)
-        return Tetromino(piece, Tetromino.get_start_pos(piece[0]))
+        return Tetromino(piece, (self.cursor_x, 0))
 
     def get_piece(self):
         self.piece_queue.insert(0, self.make_piece())
@@ -376,6 +403,7 @@ class Tetris:
             self.row_combo += 1
 
         self.last_row_complete = pygame.time.get_ticks()
+        print("SCORE + %s" % score)
         return score
 
     def complete_rows(self):
@@ -383,7 +411,7 @@ class Tetris:
         for y, row in enumerate(self.matrix.cells):
             complete = True
             for cell in row:
-                if cell is None:
+                if cell is None or not cell[1]:
                     complete = False
                     break
             if complete:
@@ -411,8 +439,8 @@ class Tetris:
         score_text = Tetris.FONT.render("SCORE: %s" % self.score, True, Tetris.WHITE)
         self.screen.blit(score_text, (padding, self.window_height - score_text.get_size()[1] - padding))
         # score debug
-        debug_text = Tetris.FONT.render(("COMBO: %s" % self.row_combo), True, Tetris.WHITE)
-        self.screen.blit(debug_text, (padding, self.window_height - score_text.get_size()[1] - debug_text.get_size()[1] - padding))
+        # debug_text = Tetris.FONT.render(("CURSOR_X: %s" % self.cursor_x), True, Tetris.WHITE)
+        # self.screen.blit(debug_text, (padding, self.window_height - score_text.get_size()[1] - debug_text.get_size()[1] - padding))
 
     def reset(self):
         self.matrix = Matrix(Tetris.matrix_width, Tetris.matrix_height)
@@ -422,20 +450,24 @@ class Tetris:
 
         self.score = 0
         self.piece_hold = None
-        self.items = []
+        self.cur_piece = None
         self.piece_queue = []
         for i in range(1, Tetris.QUEUE_SIZE):
             self.piece_queue.append(self.make_piece())
 
     def delete_tetromino(self, t):
         t.clear()
-        self.items.remove(t)
+        self.cur_piece = None
 
     def use_tetromino(self, t):
         pos = Tetromino.get_start_pos(t.structure)
         newt = Tetromino(t.get_piece(), pos)
         newt.place(self.matrix)
-        self.items.append(newt)
+        self.cur_piece = newt
+
+    def move_current_piece(self, direction):
+        if self.cur_piece:
+            self.cur_piece.move(direction)
 
     def run(self):
         self.init_display()
@@ -449,26 +481,23 @@ class Tetris:
                     self.running = False
                     sys.exit()
                 if event.type == pygame.KEYDOWN:
-                    if len(self.items) > 0:
+                    if self.cur_piece:
                         # move tetromino
                         if event.key == pygame.K_a or event.key == pygame.K_LEFT:
-                            self.items[0].move((-1, 0))
+                            self.move_current_piece((-1, 0))
                         elif event.key == pygame.K_d or event.key == pygame.K_RIGHT:
-                            self.items[0].move((1, 0))
-                        elif event.key == pygame.K_s or event.key == pygame.K_DOWN:
-                            self.items[0].move(Mino.DOWN)
+                            self.move_current_piece((1, 0))
                         # drop tetromino
                         elif event.key == pygame.K_SPACE:
-                            if len(self.items) > 0:
-                                self.items[0].instant_fall()
+                            self.cur_piece.instant_fall()
                         # rotate tetromino
                         elif event.key == pygame.K_w or event.key == pygame.K_UP:
-                            self.items[0].rotate_cc()
+                            self.cur_piece.rotate_cc()
                         # hold tetromino
                         elif event.key == pygame.K_c:
                             # hold current piece
                             hold = self.piece_hold
-                            self.piece_hold = self.items[0]
+                            self.piece_hold = self.cur_piece
                             self.delete_tetromino(self.piece_hold)
                             # place holded piece
                             if hold is not None:
@@ -484,8 +513,8 @@ class Tetris:
                         key_num = int(pygame.key.name(event.key)) - 1
                         piece = self.ALL_PIECES[max(0, min(key_num, len(self.ALL_PIECES)-1))]
                         t = Tetromino(piece, Tetromino.get_start_pos(piece[0]))
-                        if self.items[0].type != t.type:
-                            self.delete_tetromino(self.items[0])
+                        if self.cur_piece and self.cur_piece.type != t.type:
+                            self.delete_tetromino(self.cur_piece)
                             self.use_tetromino(t)
                         else:
                             self.piece_queue.append(t)
@@ -493,6 +522,7 @@ class Tetris:
                     except ValueError:
                         pass
 
+            # render pause
             if self.paused:
                 self.screen.fill(Tetris.BLACK)
                 text = Tetris.FONT.render("PRESS ESCAPE (PAUSED)", True, Tetris.WHITE)
@@ -503,16 +533,19 @@ class Tetris:
                 continue
 
             # spawn pieces
-            if len(self.items) < 1:
-                tm = self.get_piece()
-                tm.place(self.matrix)
-                self.items.append(tm)
+            if self.cur_piece is None:
+                self.cur_piece: Tetromino = self.get_piece()
+                self.cur_piece.place(self.matrix)
+                self.cur_piece.set_pos((self.cursor_x, 0))
+
+            # update cursor pos
+            if self.cur_piece:
+                self.cursor_x = self.cur_piece.pos[0]
 
             # update minos
-            for item in self.items:
-                item.update()
-                if item.frozen:
-                    self.items.remove(item)
+            self.cur_piece.update()
+            if self.cur_piece.frozen:
+                self.cur_piece = None
 
             # remove complete rows
             self.complete_rows()
@@ -523,7 +556,7 @@ class Tetris:
                     self.paused = True
                     self.reset()
 
-            # test
+            # update combo
             if pygame.time.get_ticks() - self.last_row_complete > self.ROW_COMBO_TIME:
                 self.row_combo = 0
 
@@ -533,8 +566,8 @@ class Tetris:
             # draw background
             self.matrix.draw_background()
             # draw landing
-            if len(self.items) > 0:
-                self.items[0].draw_landing_column(self.matrix.surface)
+            if self.cur_piece is not None:
+                self.cur_piece.draw_landing_column(self.matrix.surface)
             # draw cells
             self.matrix.draw_cells()
             # blit matrix
