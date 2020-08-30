@@ -278,7 +278,7 @@ class Tetris:
     ALL_PIECES = [T_PIECE, L_PIECE, L_PIECE_M, SQUARE_PIECE, LONG_PIECE, ZIG_PIECE, ZIG_PIECE_M]
 
     matrix_width, matrix_height = 10, 24
-    window_width, window_height = 400, 960
+    window_width, window_height = 250, 600
     framerate = 30
     window_label = "Tetris"
     window_icon = "tetris-logo.png"
@@ -452,3 +452,10 @@ class Tetris:
             pygame.display.flip()
 
             self.clock.tick(Tetris.framerate)
+
+
+if len(sys.argv) == 3:
+    Tetris.window_width, Tetris.window_height = int(sys.argv[1]), int(sys.argv[2])
+
+Tetris.init()
+Tetris().run()
